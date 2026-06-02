@@ -1,0 +1,5 @@
+flask>=2.3.0
+requests>=2.28.0
+# Pillow y easyocr son opcionales (para OCR real)
+# Pillow>=9.0.0
+# easyocr>=1.7.0

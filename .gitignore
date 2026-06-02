@@ -1,0 +1,23 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.pio-core/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Capturas guardadas en runtime
+servicio/capturas/*.jpg
+
+# VSCode
+.vscode/
+
+# Misc
+*.DS_Store
+*.log
