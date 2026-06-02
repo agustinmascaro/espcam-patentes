@@ -1,115 +1,161 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <HTTPClient.h>
 
-// ── Configuración ─────────────────────────────────────────────────────────
-const char* SSID         = "TU_SSID";
-const char* PASSWORD     = "TU_PASSWORD";
-const char* SERVICIO_URL = "http://192.168.1.X:5000/validar";
+// ── Configuración WiFi ────────────────────────────────────────────────────
+const char* SSID     = "TU_SSID";
+const char* PASSWORD = "TU_PASSWORD";
 
 WebServer server(80);
 
-// Buffer para la imagen recibida.
-// ESP32-CAM tiene PSRAM de 4 MB; si no hay PSRAM se limita a ~60 KB en RAM interna.
-#define IMG_BUF_SIZE (200 * 1024)
-static uint8_t* imgBuf   = nullptr;
-static size_t   imgLen   = 0;
-static char     imgNombre[64] = "";
+// Buffer para la imagen recibida desde el navegador
+#define IMG_BUF_SIZE (200 * 1024)   // 200 KB máximo
+static uint8_t* imgBuf = nullptr;
+static size_t   imgLen = 0;
 
-// ── Recepción de imagen ────────────────────────────────────────────────────
+// ── Página web ────────────────────────────────────────────────────────────
+const char HTML[] PROGMEM = R"HTML(
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESP-CAM Simulador</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 480px;
+           margin: 50px auto; padding: 0 20px; background: #f5f5f5; }
+    h2   { color: #333; }
+    .card { background: white; border-radius: 8px; padding: 24px;
+            box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+    input[type=file] { display: block; margin: 16px 0; width: 100%; }
+    button { background: #0077cc; color: white; border: none;
+             padding: 10px 24px; border-radius: 4px; cursor: pointer; font-size: 1em; }
+    button:disabled { background: #aaa; cursor: default; }
+    #status { margin-top: 16px; padding: 10px; border-radius: 4px;
+              font-size: .9em; white-space: pre-wrap; display: none; }
+    .ok  { background: #d4edda; color: #155724; display: block !important; }
+    .err { background: #f8d7da; color: #721c24; display: block !important; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Simulador ESP-CAM</h2>
+    <p>Seleccioná una imagen para simular una captura de cámara.</p>
+    <form id="frm">
+      <input type="file" id="img" accept="image/jpeg,image/png" required>
+      <button type="submit" id="btn">Enviar imagen</button>
+    </form>
+    <div id="status"></div>
+  </div>
+  <script>
+    const frm = document.getElementById('frm');
+    const btn = document.getElementById('btn');
+    const st  = document.getElementById('status');
 
-void handleUpload() {
+    frm.onsubmit = async (e) => {
+      e.preventDefault();
+      const file = document.getElementById('img').files[0];
+      if (!file) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Enviando...';
+      st.className = '';
+      st.textContent = '';
+
+      try {
+        const fd = new FormData();
+        fd.append('imagen', file, file.name);
+
+        const r  = await fetch('/upload', { method: 'POST', body: fd });
+        const txt = await r.text();
+        st.className = r.ok ? 'ok' : 'err';
+        try { st.textContent = JSON.stringify(JSON.parse(txt), null, 2); }
+        catch { st.textContent = txt; }
+      } catch (ex) {
+        st.className = 'err';
+        st.textContent = 'Error de red: ' + ex.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Enviar imagen';
+      }
+    };
+  </script>
+</body>
+</html>
+)HTML";
+
+// ── TODO: comunicación con el otro ESP ───────────────────────────────────
+//
+// Completar esta función para enviar la imagen al ESP receptor (ESP2).
+// Parámetros:
+//   buf  - puntero al buffer con los bytes JPEG de la imagen
+//   len  - cantidad de bytes de la imagen
+// Retorna true si el envío fue exitoso.
+//
+bool enviarAlOtroESP(const uint8_t* buf, size_t len) {
+    // Implementar aquí la comunicación con el ESP2.
+    //
+    // Ejemplo con HTTP:
+    //
+    //   HTTPClient http;
+    //   http.begin("http://<IP_ESP2>/imagen");
+    //   http.addHeader("Content-Type", "image/jpeg");
+    //   int code = http.POST((uint8_t*)buf, len);
+    //   http.end();
+    //   return (code == 200);
+
+    return false;   // <- reemplazar por la implementación real
+}
+// ─────────────────────────────────────────────────────────────────────────
+
+// Callback de recepción multipart (llamado mientras llegan los chunks)
+void onUpload() {
     HTTPUpload& upload = server.upload();
 
     if (upload.status == UPLOAD_FILE_START) {
         imgLen = 0;
-        strlcpy(imgNombre, upload.filename.c_str(), sizeof(imgNombre));
-        Serial.printf("[IMG] Recibiendo: %s\n", imgNombre);
+        Serial.printf("[CAM] Recibiendo: %s\n", upload.filename.c_str());
 
     } else if (upload.status == UPLOAD_FILE_WRITE) {
         if (imgBuf && (imgLen + upload.currentSize) < IMG_BUF_SIZE) {
             memcpy(imgBuf + imgLen, upload.buf, upload.currentSize);
             imgLen += upload.currentSize;
-        } else if (!imgBuf) {
-            Serial.println("[IMG] Buffer no disponible");
         }
 
     } else if (upload.status == UPLOAD_FILE_END) {
-        Serial.printf("[IMG] Recibidos: %zu bytes\n", imgLen);
+        Serial.printf("[CAM] Imagen completa: %zu bytes\n", imgLen);
     }
 }
 
-// Acepta también envío como body raw (Content-Type: image/jpeg)
-void handleImagenRaw() {
-    if (server.method() != HTTP_POST) {
-        server.send(405, "text/plain", "Metodo no permitido");
-        return;
-    }
-
-    // Si ya se llenó por multipart (handleUpload) usamos ese buffer;
-    // si llegó como body plain lo copiamos aquí.
-    if (imgLen == 0 && server.hasArg("plain")) {
-        String body = server.arg("plain");
-        if (imgBuf && body.length() < IMG_BUF_SIZE) {
-            memcpy(imgBuf, body.c_str(), body.length());
-            imgLen = body.length();
-        }
-    }
-
-    // Guardar nombre de archivo del header opcional
-    if (server.hasHeader("X-Filename")) {
-        strlcpy(imgNombre, server.header("X-Filename").c_str(), sizeof(imgNombre));
-    }
-
-    if (!imgBuf || imgLen == 0) {
+// Handler POST /upload — se ejecuta al terminar la subida
+void onUploadDone() {
+    if (imgLen == 0) {
         server.send(400, "application/json", "{\"error\":\"imagen vacia\"}");
         return;
     }
 
-    Serial.printf("[FWD] Reenviando %zu bytes a servicio...\n", imgLen);
+    bool ok = enviarAlOtroESP(imgBuf, imgLen);
 
-    // Reenviar al servicio de validación
-    HTTPClient http;
-    http.begin(SERVICIO_URL);
-    http.addHeader("Content-Type", "image/jpeg");
-    if (imgNombre[0]) {
-        http.addHeader("X-Filename", imgNombre);
-    }
+    String json = "{\"bytes\":"  + String(imgLen)
+                + ",\"enviado\":" + (ok ? "true" : "false") + "}";
 
-    int code = http.POST(imgBuf, imgLen);
-    String respuesta;
+    Serial.printf("[CAM] Enviado al ESP2: %s\n", ok ? "OK" : "PENDIENTE");
+    server.send(200, "application/json", json);
 
-    if (code > 0) {
-        respuesta = http.getString();
-        Serial.printf("[FWD] Respuesta %d: %s\n", code, respuesta.c_str());
-    } else {
-        respuesta = "{\"error\":\"servicio no disponible\"}";
-        Serial.printf("[FWD] Error HTTP: %s\n", http.errorToString(code).c_str());
-    }
-    http.end();
-
-    imgLen = 0;  // limpiar buffer
-    server.send(200, "application/json", respuesta);
+    imgLen = 0;  // limpiar para la próxima imagen
 }
 
-// ── Setup / Loop ───────────────────────────────────────────────────────────
-
+// ── Setup / Loop ──────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    delay(500);
 
-    // Intentar usar PSRAM si está disponible (ESP32-CAM tiene 4 MB)
-    if (psramFound()) {
-        imgBuf = (uint8_t*)ps_malloc(IMG_BUF_SIZE);
-        Serial.printf("[PSRAM] Buffer de %d KB en PSRAM\n", IMG_BUF_SIZE / 1024);
-    } else {
-        imgBuf = (uint8_t*)malloc(IMG_BUF_SIZE);
-        Serial.printf("[RAM] Buffer de %d KB en RAM interna\n", IMG_BUF_SIZE / 1024);
-    }
+    // Alocar buffer (usar PSRAM si el ESP32-CAM la tiene disponible)
+    imgBuf = psramFound()
+        ? (uint8_t*)ps_malloc(IMG_BUF_SIZE)
+        : (uint8_t*)malloc(IMG_BUF_SIZE);
 
     if (!imgBuf) {
-        Serial.println("[ERROR] No hay memoria para el buffer de imagen");
+        Serial.println("[ERROR] Sin memoria para buffer de imagen");
     }
 
     Serial.print("[WiFi] Conectando");
@@ -118,22 +164,15 @@ void setup() {
         delay(500);
         Serial.print(".");
     }
-    Serial.printf("\n[WiFi] IP: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("\n[WiFi] Conectado. Abrir: http://%s\n",
+                  WiFi.localIP().toString().c_str());
 
-    // Colectar header X-Filename
-    const char* headers[] = {"X-Filename"};
-    server.collectHeaders(headers, 1);
-
-    // Endpoint principal: acepta imagen como multipart o raw body
-    server.on("/imagen", HTTP_POST, handleImagenRaw, handleUpload);
-
-    // Health check
-    server.on("/ping", HTTP_GET, []() {
-        server.send(200, "application/json", "{\"ok\":true,\"rol\":\"esp1-cam\"}");
+    server.on("/",       HTTP_GET,  []() {
+        server.send_P(200, "text/html", HTML);
     });
+    server.on("/upload", HTTP_POST, onUploadDone, onUpload);
 
     server.begin();
-    Serial.println("[HTTP] ESP1 listo — esperando imágenes en :80/imagen");
 }
 
 void loop() {
