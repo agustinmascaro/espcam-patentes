@@ -15,7 +15,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-API_TOKEN = "TU_API_TOKEN"
+API_TOKEN = "7309a6b94012c5101a316a65445471678c814b66"
 API_URL   = "https://api.platerecognizer.com/v1/plate-reader/"
 
 capturas_dir = Path(__file__).parent / "capturas"
