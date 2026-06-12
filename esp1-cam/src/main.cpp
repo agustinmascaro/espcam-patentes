@@ -6,11 +6,11 @@
 #include <ArduinoJson.h>
 
 // ── Configuración ─────────────────────────────────────────────────────────
-const char* SSID             = "TU_SSID";
-const char* PASSWORD         = "TU_PASSWORD";
-const char* PROXY_IP         = "IP_DE_LA_PC";  // PC con servicio.py
+const char* SSID             = "Campus-TICs";
+const char* PASSWORD         = "";
+const char* PROXY_IP         = "172.22.74.120";  // PC con servicio.py
 const int   PROXY_PUERTO     = 5000;
-const char* PATENTE_ESPERADA = "AA021ID";
+const char* PATENTE_ESPERADA = "IJR792";
 
 #define IMG_BUF_SIZE (20 * 1024)
 static uint8_t imgBuf[IMG_BUF_SIZE];
